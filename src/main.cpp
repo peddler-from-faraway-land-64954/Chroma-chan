@@ -1,6 +1,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <boost/algorithm/string.hpp>
+#include <boost/log/trivial.hpp>
 #include <dpp/appcommand.h>
 #include <dpp/dpp.h>
 #include "colors.h"
@@ -53,8 +54,12 @@ int main() {
 			auto member = event.command.member;
 			auto guild = member.guild_id;
 			auto rolemap = bot.roles_get_sync(guild);
+			for (auto role: rolemap){
+				BOOST_LOG_TRIVIAL(trace) << "id=" << role.first << "; name=" << role.second.name;
+			}
 			for(auto oldrole : member.get_roles()){
 				std::regex crf("^color-([0-9]|[abcdef]){6}$");
+				BOOST_LOG_TRIVIAL(trace) << "id=" << oldrole;
 				if(std::regex_search(rolemap.at(oldrole).name, crf)){
 					member.remove_role(oldrole);
 					if (rolemap.at(oldrole).get_members().size()<=1){

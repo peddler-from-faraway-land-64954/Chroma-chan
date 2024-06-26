@@ -12,10 +12,13 @@ add_executable(${PROJECT_NAME}
  
 # Find our pre-installed DPP package (using FindDPP.cmake).
 find_package(DPP REQUIRED)
+find_package(Boost REQUIRED COMPONENTS system log)
  
 # Link the pre-installed DPP package.
 target_link_libraries(${PROJECT_NAME} 
     ${DPP_LIBRARIES}
+    ${Boost_SYSTEM_LIBRARY}
+    ${Boost_LOG_LIBRARY}
 )
  
 # Include the DPP directories.
