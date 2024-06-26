@@ -82,28 +82,13 @@ int main() {
 		if (event.command.get_command_name() == "ping") {
 			event.reply("Pong!");
 		}
-		if (event.command.get_command_name() == "color") {
-			std::string color="";
-			try {
-				color = std::get<std::string>(event.get_parameter("color"));
-				BOOST_LOG_TRIVIAL(trace) << "User has provided color";
-			} catch (std::bad_variant_access){
-				BOOST_LOG_TRIVIAL(trace) << "No color provided";
-			}
-			if (color=="") color = random_color();
-			BOOST_LOG_TRIVIAL(trace) << "color = " << color;
-			color = color2hex(color);
-			BOOST_LOG_TRIVIAL(trace) << "color = " << color;
-			if (color==""){
-				event.reply("Invalid Color");
-				return;
-			}
-			event.reply("Color: "+color);
+		if (event.command.get_command_name() == "clearcolor") {
 			auto member = event.command.member;
 			BOOST_LOG_TRIVIAL(trace) << "user = " << member.user_id;
 			auto guild = member.guild_id;
 			BOOST_LOG_TRIVIAL(trace) << "guild = " << guild;
-			bot.roles_get(guild,[&member, &bot, &guild, &color, &event](const dpp::confirmation_callback_t rolemap_event){
+			auto roles = member.get_roles();
+			bot.roles_get(guild,[member, &bot, guild, event](const dpp::confirmation_callback_t rolemap_event) mutable {
 				auto rolemap = std::get<dpp::role_map>(rolemap_event.value);
 				std::vector<dpp::snowflake> rroles;
 				for (auto pairs: rolemap){
@@ -120,37 +105,87 @@ int main() {
 					}
 				}
 				BOOST_LOG_TRIVIAL(trace) << "old roles identified";
-			/* 	for (auto oldrole : rroles){ */
-			/* 		/1* member.remove_role(oldrole); *1/ */
-			/* 	} */
-			/* 	try { */
-			/* 		auto frole = std::get<dpp::snowflake>(role_in_rolemap(rolemap,"color-"+color)); */
-			/* 		BOOST_LOG_TRIVIAL(trace) << "colorrole id = " << frole; */
-			/* 		/1* member.add_role(frole); *1/ */
-			/* 		/1* bot.guild_edit_member(member,[&event](const dpp::confirmation_callback_t& e){ *1/ */
-			/* 		/1* 	event.reply("Your color has been changed successfully."); *1/ */
-			/* 		/1* }); *1/ */
-			/* 		event.reply("Your color has been changed successfully."); */
-			/* 	} catch (std::bad_variant_access) { */
-			/* 		BOOST_LOG_TRIVIAL(trace) << "Creating new role"; */
-			/* 		auto colorrole = color2role(color, guild); */
-			/* 		bot.role_create(colorrole, [&member, &bot, &event](const dpp::confirmation_callback_t & event_role){ */
-			/* 			auto colorrole = std::get<dpp::role>(event_role.value); */
-			/* 			auto frole = colorrole.id; */
-			/* 			BOOST_LOG_TRIVIAL(trace) << "colorrole id = " << frole; */
-			/* 			/1* member.add_role(frole); *1/ */
-			/* 			/1* bot.guild_edit_member_sync(member); *1/ */
-			/* 			event.reply("Your color has been changed successfully."); */
-			/* 			/1* bot.guild_edit_member(member,[&event](const dpp::confirmation_callback_t& e){ *1/ */
-			/* 			/1* 	event.reply("Your color has been changed successfully."); *1/ */
-			/* 			/1* }); *1/ */
-			/* 		}); */
-			/* 	} */
-			/* 	for (auto oldrole : rroles){ */
-			/* 		if (rolemap.at(oldrole).get_members().size()<=1){ */
-			/* 			/1* bot.role_delete(guild, oldrole); *1/ */
-			/* 		} */
-			/* 	} */
+				for (auto oldrole : rroles){
+					member.remove_role(oldrole);
+				}
+				bot.guild_edit_member(member,[event](const dpp::confirmation_callback_t& e){
+					event.reply("Your color has reset.");
+				});
+				for (auto oldrole : rroles){
+					if (rolemap.at(oldrole).get_members().size()<=1){
+						bot.role_delete(guild, oldrole);
+					}
+				}
+			});
+		}
+		if (event.command.get_command_name() == "color") {
+			std::string color="";
+			try {
+				color = std::get<std::string>(event.get_parameter("color"));
+				BOOST_LOG_TRIVIAL(trace) << "User has provided color";
+			} catch (std::bad_variant_access){
+				BOOST_LOG_TRIVIAL(trace) << "No color provided";
+			}
+			if (color=="") color = random_color();
+			BOOST_LOG_TRIVIAL(trace) << "color = " << color;
+			color = color2hex(color);
+			BOOST_LOG_TRIVIAL(trace) << "color = " << color;
+			if (color==""){
+				event.reply("Invalid Color");
+				return;
+			}
+			auto member = event.command.member;
+			BOOST_LOG_TRIVIAL(trace) << "user = " << member.user_id;
+			auto guild = member.guild_id;
+			BOOST_LOG_TRIVIAL(trace) << "guild = " << guild;
+			auto roles = member.get_roles();
+			bot.roles_get(guild,[member, &bot, guild, color, event](const dpp::confirmation_callback_t rolemap_event) mutable {
+				auto rolemap = std::get<dpp::role_map>(rolemap_event.value);
+				std::vector<dpp::snowflake> rroles;
+				for (auto pairs: rolemap){
+					BOOST_LOG_TRIVIAL(trace) << "id = " << pairs.first << "; name = " << pairs.second.name;
+				}
+				auto got_roles = member.get_roles();
+				BOOST_LOG_TRIVIAL(trace) << "role list length = " << got_roles.size();
+				for(auto oldrole : got_roles){
+					std::regex crf("^color-([0-9]|[abcdef]){6}$");
+					BOOST_LOG_TRIVIAL(trace) << "id = " << oldrole;
+					if(rolemap.contains(oldrole) && std::regex_search(rolemap.at(oldrole).name, crf)){
+						BOOST_LOG_TRIVIAL(trace) << "id to remove = " << oldrole;
+						rroles.push_back(oldrole);
+					}
+				}
+				BOOST_LOG_TRIVIAL(trace) << "old roles identified";
+				for (auto oldrole : rroles){
+					member.remove_role(oldrole);
+				}
+				try {
+					auto frole = std::get<dpp::snowflake>(role_in_rolemap(rolemap,"color-"+color));
+					BOOST_LOG_TRIVIAL(trace) << "colorrole id = " << frole;
+					member.add_role(frole);
+					bot.guild_edit_member(member,[event](const dpp::confirmation_callback_t& e){
+						event.reply("Your color has been changed successfully.");
+					});
+				} catch (std::bad_variant_access) {
+					BOOST_LOG_TRIVIAL(trace) << "Creating new role";
+					auto colorrole = color2role(color, guild);
+					bot.role_create(colorrole, [member, &bot, event](const dpp::confirmation_callback_t & event_role) mutable {
+						auto colorrole = std::get<dpp::role>(event_role.value);
+						auto frole = colorrole.id;
+						BOOST_LOG_TRIVIAL(trace) << "colorrole id = " << frole;
+						member.add_role(frole);
+						bot.guild_edit_member(member,[event](const dpp::confirmation_callback_t& e){
+							event.reply("Your color has been changed successfully.");
+						});
+					});
+				}
+				for (auto oldrole : rroles){
+					if (rolemap.at(oldrole).get_members().size()<=1){
+						if (rolemap.at(oldrole).name != ("color-"+color)){
+							bot.role_delete(guild, oldrole);
+						}
+					}
+				}
 			});
 		}
 	});
@@ -159,8 +194,9 @@ int main() {
 		if (dpp::run_once<struct register_bot_commands>()) {
 			auto ping = dpp::slashcommand("ping", "Ping pong!", bot.me.id);
 			auto color = dpp::slashcommand("color", "Set color", bot.me.id);
+			auto clear_color = dpp::slashcommand("clearcolor", "clear color", bot.me.id);
 			color.add_option(dpp::command_option(dpp::co_string,"color","Color name"));
-			bot.global_bulk_command_create({ping, color});
+			bot.global_bulk_command_create({ping, color, clear_color});
 		}
 	});
 
