@@ -2,6 +2,7 @@
 cmake_minimum_required(VERSION 3.22)
 # Project name, version and description
 project(discord-bot VERSION 1.0 DESCRIPTION "A discord bot")
+set(CMAKE_BUILD_TYPE Debug)
  
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
  
@@ -12,10 +13,13 @@ add_executable(${PROJECT_NAME}
  
 # Find our pre-installed DPP package (using FindDPP.cmake).
 find_package(DPP REQUIRED)
+find_package(Boost REQUIRED COMPONENTS system log)
  
 # Link the pre-installed DPP package.
 target_link_libraries(${PROJECT_NAME} 
     ${DPP_LIBRARIES}
+    ${Boost_SYSTEM_LIBRARY}
+    ${Boost_LOG_LIBRARY}
 )
  
 # Include the DPP directories.

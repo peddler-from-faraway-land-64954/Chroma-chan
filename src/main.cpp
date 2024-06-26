@@ -1,22 +1,74 @@
+#include <boost/log/sources/record_ostream.hpp>
 #include <cstdint>
 #include <cstdlib>
 #include <boost/algorithm/string.hpp>
+#include <boost/log/trivial.hpp>
 #include <dpp/appcommand.h>
 #include <dpp/dpp.h>
 #include "colors.h"
 #include <dpp/role.h>
+#include <dpp/snowflake.h>
 #include <ios>
 #include <iostream>
 #include <regex>
 #include <sstream>
 #include <random>
+#include <string>
+#include <variant>
 
 std::string BOT_TOKEN;
 
+std::string random_color(){
+	static std::random_device rd;
+	static std::mt19937 gen(rd());
+	static std::uniform_int_distribution<> distrib(0, named_colors.size()-1);
+	BOOST_LOG_TRIVIAL(trace) << "Randomly assigning color";
+	auto random_it = std::next(std::begin(named_colors), distrib(gen));
+	return (random_it->first);
+}
+
+std::variant<bool, dpp::snowflake> role_in_rolemap(dpp::role_map& rolemap, std::string role){
+	BOOST_LOG_TRIVIAL(trace) << "Checking if color role already exists";
+	for (auto rm: rolemap){
+		if (rm.second.name==role) {
+			BOOST_LOG_TRIVIAL(trace) << "Color role found";
+			BOOST_LOG_TRIVIAL(trace) << "Color role id =" << rm.second.id;
+			return rm.second.id;
+		}
+	}
+	BOOST_LOG_TRIVIAL(trace) << "Color role not found";
+	return false;
+}
+
+std::string color2hex(std::string& color){
+	boost::algorithm::to_lower(color);
+	if (named_colors.contains(color)){
+		BOOST_LOG_TRIVIAL(trace) << "Named color detected";
+		return boost::algorithm::to_lower_copy(named_colors.at(color));
+	} else {
+		std::regex cf("^([0-9]|[abcdef]){6}$");
+		if (!std::regex_search(color, cf)){
+			return "";
+		}
+		return color;
+	}
+}
+
+dpp::role color2role(std::string& color, dpp::snowflake& guild){
+	dpp::role colorrole;
+	colorrole.set_name("color-"+color);
+	uint32_t col;
+	std::stringstream ss;
+	ss << std::hex << color;
+	ss >> col;
+	if (col == 0) col++;
+	colorrole.set_color(col);
+	colorrole.set_flags(dpp::r_managed);
+	colorrole.set_guild_id(guild);
+	return colorrole;
+}
+
 int main() {
-	std::random_device rd;
-	std::mt19937 gen(rd());
-	std::uniform_int_distribution<> distrib(0, named_colors.size()-1);
 	if (std::getenv("BOT_TOKEN") == NULL){
 		std::cerr << "BOT_TOKEN not set" << std::endl;
 		return 0;
@@ -26,7 +78,7 @@ int main() {
 
 	bot.on_log(dpp::utility::cout_logger());
 
-	bot.on_slashcommand([&bot, &distrib, &gen](const dpp::slashcommand_t& event) {
+	bot.on_slashcommand([&bot](const dpp::slashcommand_t& event) {
 		if (event.command.get_command_name() == "ping") {
 			event.reply("Pong!");
 		}
@@ -34,62 +86,72 @@ int main() {
 			std::string color="";
 			try {
 				color = std::get<std::string>(event.get_parameter("color"));
-			} catch (std::bad_variant_access){}
+				BOOST_LOG_TRIVIAL(trace) << "User has provided color";
+			} catch (std::bad_variant_access){
+				BOOST_LOG_TRIVIAL(trace) << "No color provided";
+			}
+			if (color=="") color = random_color();
+			BOOST_LOG_TRIVIAL(trace) << "color = " << color;
+			color = color2hex(color);
+			BOOST_LOG_TRIVIAL(trace) << "color = " << color;
 			if (color==""){
-				auto random_it = std::next(std::begin(named_colors), distrib(gen));
-				color = random_it->first;
+				event.reply("Invalid Color");
+				return;
 			}
-			boost::algorithm::to_lower(color);
-			if (named_colors.contains(color)){
-				color = boost::algorithm::to_lower_copy(named_colors.at(color));
-			} else {
-				std::regex cf("^([0-9]|[abcdef]){6}$");
-				if (!std::regex_search(color, cf)){
-					event.reply("Invalid Color");
-					return;
-				}
-			}
-			std::string role = "color-"+color;
+			event.reply("Color: "+color);
 			auto member = event.command.member;
+			BOOST_LOG_TRIVIAL(trace) << "user = " << member.user_id;
 			auto guild = member.guild_id;
-			auto rolemap = bot.roles_get_sync(guild);
-			for(auto oldrole : member.get_roles()){
-				std::regex crf("^color-([0-9]|[abcdef]){6}$");
-				if(std::regex_search(rolemap.at(oldrole).name, crf)){
-					member.remove_role(oldrole);
-					if (rolemap.at(oldrole).get_members().size()<=1){
-						bot.role_delete_sync(guild, oldrole);
-					} else {
-						bot.guild_edit_member_sync(member);
+			BOOST_LOG_TRIVIAL(trace) << "guild = " << guild;
+			bot.roles_get(guild,[&member, &bot, &guild, &color, &event](const dpp::confirmation_callback_t rolemap_event){
+				auto rolemap = std::get<dpp::role_map>(rolemap_event.value);
+				std::vector<dpp::snowflake> rroles;
+				for (auto pairs: rolemap){
+					BOOST_LOG_TRIVIAL(trace) << "id = " << pairs.first << "; name = " << pairs.second.name;
+				}
+				auto got_roles = member.get_roles();
+				BOOST_LOG_TRIVIAL(trace) << "role list length = " << got_roles.size();
+				for(auto oldrole : got_roles){
+					std::regex crf("^color-([0-9]|[abcdef]){6}$");
+					BOOST_LOG_TRIVIAL(trace) << "id = " << oldrole;
+					if(rolemap.contains(oldrole) && std::regex_search(rolemap.at(oldrole).name, crf)){
+						BOOST_LOG_TRIVIAL(trace) << "id to remove = " << oldrole;
+						rroles.push_back(oldrole);
 					}
 				}
-			}
-			bool flag = false;
-			dpp::snowflake frole;
-			for (auto rm: rolemap){
-				if (rm.second.name==role) {
-					flag = true;
-					frole = rm.second.id;
-					break;
-				}
-			}
-			if (!flag){
-				dpp::role colorrole;
-				colorrole.set_name(role);
-				uint32_t col;
-				std::stringstream ss;
-				ss << std::hex << color;
-				ss >> col;
-				if (col == 0) col++;
-				colorrole.set_color(col);
-				colorrole.set_flags(dpp::r_managed);
-				colorrole.set_guild_id(guild);
-				colorrole = bot.role_create_sync(colorrole);
-				frole = colorrole.id;
-			}
-			member.add_role(frole);
-			bot.guild_edit_member_sync(member);
-			event.reply("Your color has been changed successfully.");
+				BOOST_LOG_TRIVIAL(trace) << "old roles identified";
+			/* 	for (auto oldrole : rroles){ */
+			/* 		/1* member.remove_role(oldrole); *1/ */
+			/* 	} */
+			/* 	try { */
+			/* 		auto frole = std::get<dpp::snowflake>(role_in_rolemap(rolemap,"color-"+color)); */
+			/* 		BOOST_LOG_TRIVIAL(trace) << "colorrole id = " << frole; */
+			/* 		/1* member.add_role(frole); *1/ */
+			/* 		/1* bot.guild_edit_member(member,[&event](const dpp::confirmation_callback_t& e){ *1/ */
+			/* 		/1* 	event.reply("Your color has been changed successfully."); *1/ */
+			/* 		/1* }); *1/ */
+			/* 		event.reply("Your color has been changed successfully."); */
+			/* 	} catch (std::bad_variant_access) { */
+			/* 		BOOST_LOG_TRIVIAL(trace) << "Creating new role"; */
+			/* 		auto colorrole = color2role(color, guild); */
+			/* 		bot.role_create(colorrole, [&member, &bot, &event](const dpp::confirmation_callback_t & event_role){ */
+			/* 			auto colorrole = std::get<dpp::role>(event_role.value); */
+			/* 			auto frole = colorrole.id; */
+			/* 			BOOST_LOG_TRIVIAL(trace) << "colorrole id = " << frole; */
+			/* 			/1* member.add_role(frole); *1/ */
+			/* 			/1* bot.guild_edit_member_sync(member); *1/ */
+			/* 			event.reply("Your color has been changed successfully."); */
+			/* 			/1* bot.guild_edit_member(member,[&event](const dpp::confirmation_callback_t& e){ *1/ */
+			/* 			/1* 	event.reply("Your color has been changed successfully."); *1/ */
+			/* 			/1* }); *1/ */
+			/* 		}); */
+			/* 	} */
+			/* 	for (auto oldrole : rroles){ */
+			/* 		if (rolemap.at(oldrole).get_members().size()<=1){ */
+			/* 			/1* bot.role_delete(guild, oldrole); *1/ */
+			/* 		} */
+			/* 	} */
+			});
 		}
 	});
 
